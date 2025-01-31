@@ -216,3 +216,8 @@ scratchwork/
 blip2_runner.py
 LAVIS/
 pretrained_models/
+
+vipergpt
+data/COIN
+data/*.png
+data/*.json

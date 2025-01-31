@@ -1,4 +1,5 @@
 conda create -n vipergpt python=3.10
 conda activate vipergpt
-conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.6 -c pytorch -c nvidia
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
+pip install --upgrade bitsandbytes
