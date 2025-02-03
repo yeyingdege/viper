@@ -3,7 +3,7 @@ import ast
 import math
 import sys
 import time
-
+import re
 import requests
 import torch.multiprocessing as mp
 from joblib import Memory
@@ -252,11 +252,38 @@ def load_image(path):
     return image
 
 
+def extract_code(text):
+    # match patter: ```python```
+    match = re.search(r"```python([\s\S]*?)```", text, re.DOTALL)
+
+    if match:
+        extracted_text = match.group(1)
+        extracted_text = extracted_text.strip()
+        print(f'extracted code\n{extracted_text}')
+    else:
+        extracted_text = text
+    return extracted_text
+
+def extract_code1(text):
+    # match patter: ```python
+    match = re.search(r"```python\s*(.*)", text, re.DOTALL)
+
+    if match:
+        extracted_text = match.group(1)
+        extracted_text = extracted_text.strip()
+        print('extracted code\n', extracted_text)
+    else:
+        extracted_text = text
+    return extracted_text
+
+
 def get_code(query):
     model_name_codex = 'codellama' if config.codex.model == 'codellama' else 'codex'
     code = forward(model_name_codex, prompt=query, input_type="image")
-    if config.codex.model not in ('gpt-3.5-turbo', 'gpt-4'):
+    if config.codex.model not in ('gpt-3.5-turbo', 'gpt-4', 'gpt-4o'):
         code = f'def execute_command(image, my_fig, time_wait_between_lines, syntax):' + code # chat models give execute_command due to system behaviour
+    code = extract_code(code)
+    code = extract_code1(code)
     code_for_syntax = code.replace("(image, my_fig, time_wait_between_lines, syntax)", "(image)")
     syntax_1 = Syntax(code_for_syntax, "python", theme="monokai", line_numbers=True, start_line=0)
     console.print(syntax_1)
@@ -307,6 +334,7 @@ def execute_code(code, im, show_intermediate_steps=True):
 
     console.rule(f"[bold]Final Result[/bold]", style="chartreuse2")
     show_all(None, result, 'Result', fig=f, usefig=usefig, disp=False, console_in=console, time_wait_between_lines=0)
+    return result
 
 
 def show_single_image(im):

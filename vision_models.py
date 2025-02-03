@@ -8,6 +8,7 @@ import abc
 import backoff
 import contextlib
 import openai
+from openai import OpenAI
 import os
 import re
 import timeit
@@ -30,7 +31,7 @@ from configs import config
 from utils import HiddenPrints
 
 with open('api.key') as f:
-    openai.api_key = f.read().strip()
+    client = OpenAI(api_key=f.read().strip())
 
 cache = Memory('cache/' if config.use_cache else None, verbose=0)
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -416,7 +417,7 @@ class GLIPModel(BaseModel):
         BaseModel.__init__(self, gpu_number)
 
         with contextlib.redirect_stderr(open(os.devnull, "w")):  # Do not print nltk_data messages when importing
-            from maskrcnn_benchmark.engine.predictor_glip import GLIPDemo, to_image_list, create_positive_map, \
+            from GLIP.maskrcnn_benchmark.engine.predictor_glip import GLIPDemo, to_image_list, create_positive_map, \
                 create_positive_map_label_to_token_from_positive_map
 
         working_dir = f'{config.path_pretrained_models}/GLIP/'
@@ -778,6 +779,7 @@ class GPT3Model(BaseModel):
 
     def __init__(self, gpu_number=0):
         super().__init__(gpu_number=gpu_number)
+        print('init GPT3Model')
         with open(config.gpt3.qa_prompt) as f:
             self.qa_prompt = f.read().strip()
         with open(config.gpt3.guess_prompt) as f:
@@ -850,15 +852,15 @@ class GPT3Model(BaseModel):
             response_ = []
             for i in range(len(prompts)):
                 if self.model == 'chatgpt':
-                    resp_i = [r['message']['content'] for r in
-                              response['choices'][i * self.n_votes:(i + 1) * self.n_votes]]
+                    resp_i = [r.message.content for r in
+                              response.choices[i * self.n_votes:(i + 1) * self.n_votes]]
                 else:
                     resp_i = [r['text'] for r in response['choices'][i * self.n_votes:(i + 1) * self.n_votes]]
                 response_.append(self.most_frequent(resp_i))
             response = response_
         else:
             if self.model == 'chatgpt':
-                response = [r['message']['content'] for r in response['choices']]
+                response = [r.message.content for r in response.choices]
             else:
                 response = [self.process_answer(r["text"]) for r in response['choices']]
         return response
@@ -881,14 +883,14 @@ class GPT3Model(BaseModel):
                    stop=None, top_p=1, frequency_penalty=0, presence_penalty=0):
         if model == "chatgpt":
             messages = [{"role": "user", "content": p} for p in prompt]
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+            response = client.chat.completions.create(
+                model="gpt-4o",
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=self.temperature,
             )
         else:
-            response = openai.Completion.create(
+            response = client.chat.completions.create(
                 model=model,
                 prompt=prompt,
                 max_tokens=max_tokens,
@@ -958,13 +960,14 @@ def codex_helper(extended_prompt):
     assert 0 <= config.codex.temperature <= 1
     assert 1 <= config.codex.best_of <= 20
 
-    if config.codex.model in ("gpt-4", "gpt-3.5-turbo"):
+    if config.codex.model in ("gpt-4", "gpt-3.5-turbo", "gpt-4o"):
         if not isinstance(extended_prompt, list):
             extended_prompt = [extended_prompt]
-        responses = [openai.ChatCompletion.create(
+
+        print('start openai api call ====>', config.codex.model)
+        responses = [client.chat.completions.create(
             model=config.codex.model,
             messages=[
-                # {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "system", "content": "Only answer with a function starting def execute_command."},
                 {"role": "user", "content": prompt}
             ],
@@ -977,14 +980,14 @@ def codex_helper(extended_prompt):
             stop=["\n\n"],
         )
             for prompt in extended_prompt]
-        resp = [r['choices'][0]['message']['content'].replace("execute_command(image)",
-                                                              "execute_command(image, my_fig, time_wait_between_lines, syntax)")
+        resp = [r.choices[0].message.content.replace("execute_command(image)",
+                                                    "execute_command(image, my_fig, time_wait_between_lines, syntax)")
                 for r in responses]
     #         if len(resp) == 1:
     #             resp = resp[0]
     else:
         warnings.warn('OpenAI Codex is deprecated. Please use GPT-4 or GPT-3.5-turbo.')
-        response = openai.Completion.create(
+        response = client.chat.completions.create(
             model="code-davinci-002",
             temperature=config.codex.temperature,
             prompt=extended_prompt,
@@ -1013,6 +1016,7 @@ class CodexModel(BaseModel):
 
     def __init__(self, gpu_number=0):
         super().__init__(gpu_number=gpu_number)
+        print('init CodexModel')
         with open(config.codex.prompt) as f:
             self.base_prompt = f.read().strip()
         self.fixed_code = None
@@ -1021,6 +1025,7 @@ class CodexModel(BaseModel):
                 self.fixed_code = f.read()
 
     def forward(self, prompt, input_type='image', prompt_file=None, base_prompt=None, extra_context=None):
+        print('CodexModel forward')
         if config.use_fixed_code:  # Use the same program for every sample, like in socratic models
             return [self.fixed_code] * len(prompt) if isinstance(prompt, list) else self.fixed_code
 
@@ -1036,12 +1041,17 @@ class CodexModel(BaseModel):
                                replace('EXTRA_CONTEXT_HERE', str(ec))
                                for p, ec in zip(prompt, extra_context)]
         elif isinstance(prompt, str):
-            extended_prompt = [base_prompt.replace("INSERT_QUERY_HERE", prompt).
-                               replace('INSERT_TYPE_HERE', input_type).
-                               replace('EXTRA_CONTEXT_HERE', extra_context)]
+            if extra_context:
+                extended_prompt = [base_prompt.replace("INSERT_QUERY_HERE", prompt).
+                                replace('INSERT_TYPE_HERE', input_type).
+                                replace('EXTRA_CONTEXT_HERE', extra_context)]
+            else:
+                extended_prompt = [base_prompt.replace("INSERT_QUERY_HERE", prompt).
+                                replace('INSERT_TYPE_HERE', input_type).
+                                replace('EXTRA_CONTEXT_HERE', 'None')]
         else:
             raise TypeError("prompt must be a string or a list of strings")
-
+        print('len(extended_prompt)[0],', len(extended_prompt[0]))
         result = self.forward_(extended_prompt)
         if not isinstance(prompt, list):
             result = result[0]
@@ -1055,6 +1065,7 @@ class CodexModel(BaseModel):
                 response += self.forward_(extended_prompt[i:i + self.max_batch_size])
             return response
         try:
+            print('Running codex_helper')
             response = codex_helper(extended_prompt)
         except openai.error.RateLimitError as e:
             print("Retrying Codex, splitting batch")
