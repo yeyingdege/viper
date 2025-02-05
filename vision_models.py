@@ -836,7 +836,7 @@ class GPT3Model(BaseModel):
 
     def process_guesses_fn(self, prompt):
         # The code is the same as get_qa_fn, but we separate in case we want to modify it later
-        response = self.query_gpt3(prompt, model=self.model, max_tokens=5, logprobs=1, stream=False,
+        response = self.query_gpt3(prompt, model=self.model, max_tokens=256, logprobs=1, stream=False,
                                    stop=["\n", "<|endoftext|>"])
         return response
 
@@ -859,14 +859,14 @@ class GPT3Model(BaseModel):
                 response_.append(self.most_frequent(resp_i))
             response = response_
         else:
-            if self.model == 'chatgpt':
+            if self.model in ["chatgpt", "gpt-4o", "gpt-3.5-turbo", "gpt-4"]:
                 response = [r.message.content for r in response.choices]
             else:
                 response = [self.process_answer(r["text"]) for r in response['choices']]
         return response
 
     def get_qa_fn(self, prompt):
-        response = self.query_gpt3(prompt, model=self.model, max_tokens=5, logprobs=1, stream=False,
+        response = self.query_gpt3(prompt, model=self.model, max_tokens=256, logprobs=1, stream=False,
                                    stop=["\n", "<|endoftext|>"])
         return response
 
@@ -881,7 +881,7 @@ class GPT3Model(BaseModel):
 
     def query_gpt3(self, prompt, model="text-davinci-003", max_tokens=16, logprobs=None, stream=False,
                    stop=None, top_p=1, frequency_penalty=0, presence_penalty=0):
-        if model == "chatgpt":
+        if model in ["chatgpt", "gpt-4o", "gpt-3.5-turbo", "gpt-4"]:
             messages = [{"role": "user", "content": p} for p in prompt]
             response = client.chat.completions.create(
                 model="gpt-4o",
@@ -980,11 +980,14 @@ def codex_helper(extended_prompt):
             stop=["\n\n"],
         )
             for prompt in extended_prompt]
-        resp = [r.choices[0].message.content.replace("execute_command(image)",
-                                                    "execute_command(image, my_fig, time_wait_between_lines, syntax)")
+        # resp = [r.choices[0].message.content.replace("execute_command(image)",
+        #                                             "execute_command(image, my_fig, time_wait_between_lines, syntax)")
+        resp = [r.choices[0].message.content
                 for r in responses]
-    #         if len(resp) == 1:
-    #             resp = resp[0]
+        # count tokens
+        # prompt_token = responses[0].usage.prompt_tokens
+        # gen_token = responses[0].usage.completion_tokens
+        # print(prompt_token, gen_token)
     else:
         warnings.warn('OpenAI Codex is deprecated. Please use GPT-4 or GPT-3.5-turbo.')
         response = client.chat.completions.create(
@@ -1051,7 +1054,7 @@ class CodexModel(BaseModel):
                                 replace('EXTRA_CONTEXT_HERE', 'None')]
         else:
             raise TypeError("prompt must be a string or a list of strings")
-        print('len(extended_prompt)[0],', len(extended_prompt[0]))
+        print('len(extended_prompt)[0],', len(extended_prompt[0])) # 26.5k
         result = self.forward_(extended_prompt)
         if not isinstance(prompt, list):
             result = result[0]

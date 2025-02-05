@@ -6,3 +6,11 @@ dataset:
 blip_v2_model_type: blip2-flan-t5-xxl  # Change to blip2-flan-t5-xl for smaller GPUs
 blip_half_precision: True
 # Add more changes here, following the same format as base_config.yaml
+gpt3:
+    model: gpt-4o
+codex:
+    model: gpt-4o
+    max_tokens: 2048
+    prompt: ./prompts/pkgvqa.prompt
+fixed_code_file: ./prompts/fixed_code/blip2_video.prompt
+select_answer_prompt: ./prompts/select_answer.prompt

@@ -3,11 +3,10 @@ import torch
 import os
 import json
 from tqdm import tqdm
-from PIL import Image
-from torchvision import transforms
 from decord_func import decord_video_given_start_end_seconds
 from utils import parse_choice, TypeAccuracy
 from main_simple_lib import *
+from vision_processes import queues_in
 
 from logger import setup_logger
 
@@ -24,9 +23,6 @@ QUESTION_TYPES = ['qa1_step2tool', 'qa2_bestNextStep', 'qa3_nextStep',
 #                    'qa4_step','qa5_task', 'qa6_precedingStep', 'qa7_bestPrecedingStep',
 #                    'qa9_bestInitial','qa10_bestFinal', 'qa11_domain']
 
-with open("./prompts/chatapi.prompt") as f:
-    base_prompt = f.read().strip()
-
 
 def main(args):
     vipergpt_error_cnt = 0
@@ -42,55 +38,64 @@ def main(args):
 
     total = 0
     results = {}
-    for line in tqdm(annotations, total=len(annotations)):
+    for i, line in tqdm(enumerate(annotations), total=len(annotations)):
         # Q-A Pair
-        idx = line["qid"]
+        qid = line["qid"]
+        if qid != "qa3_nextStep_38193":
+            continue
         quest_type = line["quest_type"]
         conversations = line["conversations"]
         qs = conversations[0]["value"]
         gt_answers = conversations[1]["value"]
-        results[idx] = {"qid": idx, "quest_type": quest_type, 
+        results[qid] = {"qid": qid, "quest_type": quest_type, 
                         "qs": qs, "gt": gt_answers,
                         "task_label": line["task_label"], 
                         "step_label": line["step_label"]}
-        
-        with torch.inference_mode():
-            if args.num_video_frames > 0:
-                # Load Image
-                video_path = os.path.join(args.image_folder, line["video"])
 
-                if "start_secs" in line:
-                    start_secs = line['start_secs']
-                    end_secs = line['end_secs']
-                    frames, frame_indices =  decord_video_given_start_end_seconds(video_path, 
-                        start_secs=start_secs, end_secs=end_secs,
-                        num_video_frames=args.num_video_frames)
-                else:
-                    frames, frame_indices =  decord_video_given_start_end_seconds(video_path,
-                        num_video_frames=args.num_video_frames)
+        # Load Image
+        video_path = os.path.join(args.image_folder, line["video"])
 
-                images =[ Image.fromarray(x).convert('RGB') for x in frames ]
-                images = transforms.ToTensor()(images[0])
+        if "start_secs" in line:
+            start_secs = line['start_secs']
+            end_secs = line['end_secs']
+            frames, frame_indices =  decord_video_given_start_end_seconds(video_path, 
+                start_secs=start_secs, end_secs=end_secs,
+                num_video_frames=args.num_video_frames)
+        else:
+            frames, frame_indices =  decord_video_given_start_end_seconds(video_path,
+                num_video_frames=args.num_video_frames)
 
-                qs = qs.replace("<video>\n", "")
-        logger.info(f"{idx}\nquestion:{qs}\nanswer:{gt_answers}")
+        images = torch.from_numpy(frames).byte().to('cuda')
+        images = images.permute(0, 3, 1, 2)
+
+        qs = qs.replace("<video>\n", "")
+        # convert qs to query, which contains only the question.
+        query = qs.split("select one from options:")[0]
+        possible_answers = list(line["index2ans"].values())
+        possible_answers_str = "[" + ", ".join(possible_answers) + "]"
+        logger.info(f"{qid}\nquestion:{qs}\nanswer:{gt_answers}")
         total += 1
 
         try:
-            code = get_code(qs)
+            code = get_code_video(query, input_type="video", extra_context=possible_answers_str)
             logger.info(f"code:\n{code}")
-            outputs = execute_code(code, images, show_intermediate_steps=True)
+            # code = "def execute_command(video, possible_answers, query):\n    video_segment = VideoSegment(video)\n    last_frame = video_segment.frame_from_index(-1)\n    last_caption = last_frame.simple_query('What is happening in the frame?')\n    next_step = last_frame.best_text_match(option_list=possible_answers)\n    info = {'Caption of last frame': last_caption, 'Next step suggestion': next_step}\n    answer = video_segment.select_answer(info, query, possible_answers)\n    return answer"
+            code = code.replace("def execute_command(video, possible_answers, query):", "")
+            res = run_program([code, i, images, possible_answers, query], queues_in, input_type_="video")
+            outputs = res[0]
+            logger.info(f"executed code:\n{res[1]}")
         except:
             vipergpt_error_cnt += 1
             outputs = None
             print('vipergpt encountered error')
+
         logger.info(f"output:\n{outputs}\nvipergpt_error_cnt: {vipergpt_error_cnt}")
         outputs = str(outputs)
 
         answer_id = parse_choice(outputs, line["all_choices"], line["index2ans"])
-        results[idx]["response"] = outputs
-        results[idx]["parser"] = answer_id
-        # print("qid {}:\n{}".format(idx, qs))
+        results[qid]["response"] = outputs
+        results[qid]["parser"] = answer_id
+        # print("qid {}:\n{}".format(qid, qs))
         # print("AI: {}\nParser: {}\nGT: {}\n".format(outputs, answer_id, gt_answers))
 
         global_acc.update(gt_answers, answer_id)
@@ -123,7 +128,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image-folder", type=str, default="data/COIN/videos")
     parser.add_argument("--question-file", type=str, default="data/testing_vqa19_25oct_v2.json")
-    parser.add_argument("--answers-file", type=str, default="data/answers_vipergpt_f1_25oct.json")
-    parser.add_argument("--num_video_frames", type=int, default=1)
+    parser.add_argument("--answers-file", type=str, default="data/answers_vipergpt_one_example.json")
+    parser.add_argument("--num_video_frames", type=int, default=8)
     args = parser.parse_args()
     main(args)

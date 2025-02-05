@@ -13,13 +13,14 @@ from rich.padding import Padding
 from rich.pretty import pprint
 from rich.prompt import Prompt
 from rich.syntax import Syntax
+import traceback
+from functools import partial
 from rich import print
 from rich.markup import escape as rich_escape
 
 from IPython.display import update_display, clear_output, display
 from PIL import Image
 import matplotlib.pyplot as plt
-
 from configs import config
 from utils import show_single_image
 
@@ -254,7 +255,11 @@ def load_image(path):
 
 def extract_code(text):
     # match patter: ```python```
-    match = re.search(r"```python([\s\S]*?)```", text, re.DOTALL)
+    try:
+        match = re.search(r"```python([\s\S]*?)```", text, re.DOTALL)
+    except:
+        print(text)
+        match = False
 
     if match:
         extracted_text = match.group(1)
@@ -266,7 +271,11 @@ def extract_code(text):
 
 def extract_code1(text):
     # match patter: ```python
-    match = re.search(r"```python\s*(.*)", text, re.DOTALL)
+    try:
+        match = re.search(r"```python\s*(.*)", text, re.DOTALL)
+    except:
+        print(text)
+        match = False
 
     if match:
         extracted_text = match.group(1)
@@ -342,3 +351,78 @@ def show_single_image(im):
     im.copy()
     im.thumbnail((400, 400))
     display(im)
+
+
+def get_code_video(query, input_type="video", extra_context=""):
+    # generate and process code for video QA
+    model_name_codex = 'codellama' if config.codex.model == 'codellama' else 'codex'
+    code = forward(model_name_codex, prompt=query, input_type=input_type, extra_context=extra_context)
+    if config.codex.model not in ('gpt-3.5-turbo', 'gpt-4', 'gpt-4o'):
+        code = f'def execute_command(video, possible_answers, query):' + code # chat models give execute_command due to system behaviour
+    code = extract_code(code)
+    code = extract_code1(code)
+    code = ast.unparse(ast.parse(code))
+    return code
+
+
+queue_results = None
+def run_program(parameters, queues_in_, input_type_, retrying=False):
+    from image_patch import ImagePatch, llm_query, best_image_match, distance, bool_to_yesno
+    from video_segment import VideoSegment
+
+    global queue_results
+
+    code, sample_id, image, possible_answers, query = parameters
+
+    code_header = f'def execute_command_{sample_id}(' \
+                  f'{input_type_}, possible_answers, query, ' \
+                  f'ImagePatch, VideoSegment, ' \
+                  'llm_query, bool_to_yesno, distance, best_image_match):\n' \
+                  f'    # Answer is:'
+    code = code_header + code
+
+    try:
+        exec(compile(code, 'Codex', 'exec'), globals())
+    except Exception as e:
+        print(f'Sample {sample_id} failed at compilation time with error: {e}')
+        try:
+            with open(config.fixed_code_file, 'r') as f:
+                fixed_code = f.read()
+            code = code_header + fixed_code 
+            exec(compile(code, 'Codex', 'exec'), globals())
+        except Exception as e2:
+            print(f'Not even the fixed code worked. Sample {sample_id} failed at compilation time with error: {e2}')
+            return None, code
+
+    queues = [queues_in_, queue_results]
+
+    image_patch_partial = partial(ImagePatch, queues=queues)
+    video_segment_partial = partial(VideoSegment, queues=queues)
+    llm_query_partial = partial(llm_query, queues=queues)
+
+    try:
+        result = globals()[f'execute_command_{sample_id}'](
+            # Inputs to the function
+            image, possible_answers, query,
+            # Classes to be used
+            image_patch_partial, video_segment_partial,
+            # Functions to be used
+            llm_query_partial, bool_to_yesno, distance, best_image_match)
+    except Exception as e:
+        # print full traceback
+        traceback.print_exc()
+        if retrying:
+            return None, code
+        print(f'Sample {sample_id} failed with error: {e}. Next you will see an "expected an indented block" error. ')
+        # Retry again with fixed code
+        new_code = "["  # This code will break upon execution, and it will be caught by the except clause
+        result = run_program((new_code, sample_id, image, possible_answers, query), queues_in_, input_type_,
+                             retrying=True)[0]
+
+    # The function run_{sample_id} is defined globally (exec doesn't work locally). A cleaner alternative would be to
+    # save it in a global dict (replace globals() for dict_name in exec), but then it doesn't detect the imported
+    # libraries for some reason. Because defining it globally is not ideal, we just delete it after running it.
+    if f'execute_command_{sample_id}' in globals():
+        del globals()[f'execute_command_{sample_id}']  # If it failed to compile the code, it won't be defined
+    return result, code
+

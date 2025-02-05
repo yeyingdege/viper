@@ -103,6 +103,7 @@ class VideoSegment:
             if isinstance(x, dict):
                 x = ''.join([f'\n\t- {k}: {format_dict(v)}' for k, v in x.items()])
             return x
+        # select_answer_prompt file is missing, created by user
         with open(config.select_answer_prompt, 'r') as f:
             prompt = f.read()
         info_formatting = '\n'.join([f"- {k}: {format_dict(v)}" for k, v in info.items()])

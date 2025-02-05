@@ -1,0 +1,5 @@
+Answer the question based on the provided information.
+{info}
+{question}  select one from options:
+{options}
+Return only the index of the correct answer (e.g. 1, 2, 3, 4, or 5).

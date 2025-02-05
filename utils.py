@@ -468,3 +468,26 @@ def parse_choice(response, all_choices, index2ans=None):
 
     return pred_index
 
+
+class TypeAccuracy(object):
+    def __init__(self, type_name):
+        self.correct = 0
+        self.total = 10e-9
+        self.type_name = type_name
+
+    def update(self, gt, pred):
+        self.total += 1
+        if "{}".format(pred) in gt:
+            self.correct += 1
+
+    def get_accuracy(self):
+        return 1.0*self.correct / self.total
+
+    def print_accuracy(self):
+        #print(f"{self.type_name} Accuracy: {self.get_accuracy()} | {self.correct}/{self.total}")
+        print("{} Accuracy: {:.4f} | {}/{}".format(
+                self.type_name,
+                self.get_accuracy(),
+                self.correct,
+                int(self.total)
+            ))
