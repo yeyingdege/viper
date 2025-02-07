@@ -7,7 +7,7 @@ from decord_func import decord_video_given_start_end_seconds
 from utils import parse_choice, TypeAccuracy
 from main_simple_lib import *
 from vision_processes import queues_in
-
+from datetime import datetime
 from logger import setup_logger
 
 logger = setup_logger("vipergpt", ".", 0, filename="vipergpt.log")
@@ -38,9 +38,16 @@ def main(args):
 
     total = 0
     results = {}
+    # load past evaluation results, supporting multiple evaluation without repetition
+    if os.path.exists(args.answers_file):
+        results = json.load(open(args.answers_file, "r"))
     for i, line in tqdm(enumerate(annotations), total=len(annotations)):
         # Q-A Pair
         qid = line["qid"]
+        # skip evaluating examples with existing results
+        if qid in results:
+            continue
+        # for debugging
         if qid != "qa3_nextStep_38193":
             continue
         quest_type = line["quest_type"]
@@ -54,7 +61,7 @@ def main(args):
 
         # Load Image
         video_path = os.path.join(args.image_folder, line["video"])
-
+        st = datetime.now()
         if "start_secs" in line:
             start_secs = line['start_secs']
             end_secs = line['end_secs']
@@ -115,10 +122,13 @@ def main(args):
         print("Average Acc over Type: {:.4f}".format(avg_acc))
         logger.info(f"global_acc: {global_acc.get_accuracy()}, avg_acc: {avg_acc}")
 
-    # save all results
-    print("save to {}".format(args.answers_file))
-    with open(args.answers_file, "w") as f:
-        json.dump(results, f, indent=2)
+        # update results
+        print("save to {}".format(args.answers_file))
+        with open(args.answers_file, "w") as f:
+            json.dump(results, f, indent=2)
+        
+        et = datetime.now()
+        print("Execution time for one example:", et-st)
 
     logger.info(f'vipergpt_error_cnt: {vipergpt_error_cnt}')
     print("Process Finished")
@@ -128,7 +138,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image-folder", type=str, default="data/COIN/videos")
     parser.add_argument("--question-file", type=str, default="data/testing_vqa19_25oct_v2.json")
-    parser.add_argument("--answers-file", type=str, default="data/answers_vipergpt_one_example.json")
+    parser.add_argument("--answers-file", type=str, default="data/answers_vipergpt_gpt4omini.json")
     parser.add_argument("--num_video_frames", type=int, default=8)
     args = parser.parse_args()
     main(args)

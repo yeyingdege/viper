@@ -772,6 +772,14 @@ def gpt3_cache_aux(fn_name, prompts, temperature, n_votes, result):
     return result
 
 
+# Initiate deepseek. Creat only one instance of it to save GPU memory
+if "deepseek" in config.codex.model:
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    deepseek_tokenizer = AutoTokenizer.from_pretrained("deepseek-ai/DeepSeek-Coder-V2-Lite-Base", trust_remote_code=True)
+    deepseek_model = AutoModelForCausalLM.from_pretrained("deepseek-ai/DeepSeek-Coder-V2-Lite-Base", 
+                                                                trust_remote_code=True, torch_dtype=torch.bfloat16).to(device)
+
+
 class GPT3Model(BaseModel):
     name = 'gpt3'
     to_batch = False
@@ -779,7 +787,7 @@ class GPT3Model(BaseModel):
 
     def __init__(self, gpu_number=0):
         super().__init__(gpu_number=gpu_number)
-        print('init GPT3Model')
+        print('init LLMs')
         with open(config.gpt3.qa_prompt) as f:
             self.qa_prompt = f.read().strip()
         with open(config.gpt3.guess_prompt) as f:
@@ -787,6 +795,7 @@ class GPT3Model(BaseModel):
         self.temperature = config.gpt3.temperature
         self.n_votes = config.gpt3.n_votes
         self.model = config.gpt3.model
+        self.max_tokens = config.gpt3.max_tokens
 
     # initial cleaning for reference QA results
     @staticmethod
@@ -830,13 +839,15 @@ class GPT3Model(BaseModel):
         else:
             if self.model == 'chatgpt':
                 response = [r['message']['content'].lstrip() for r in response['choices']]
+            elif "deepseek" in self.model:
+                pass
             else:
                 response = [r['text'].lstrip() for r in response['choices']]
         return response
 
     def process_guesses_fn(self, prompt):
         # The code is the same as get_qa_fn, but we separate in case we want to modify it later
-        response = self.query_gpt3(prompt, model=self.model, max_tokens=256, logprobs=1, stream=False,
+        response = self.query_gpt3(prompt, model=self.model, max_tokens=self.max_tokens, logprobs=1, stream=False,
                                    stop=["\n", "<|endoftext|>"])
         return response
 
@@ -861,17 +872,19 @@ class GPT3Model(BaseModel):
         else:
             if self.model in ["chatgpt", "gpt-4o", "gpt-3.5-turbo", "gpt-4"]:
                 response = [r.message.content for r in response.choices]
+            elif "deepseek" in self.model:
+                pass
             else:
                 response = [self.process_answer(r["text"]) for r in response['choices']]
         return response
 
     def get_qa_fn(self, prompt):
-        response = self.query_gpt3(prompt, model=self.model, max_tokens=256, logprobs=1, stream=False,
+        response = self.query_gpt3(prompt, model=self.model, max_tokens=self.max_tokens, logprobs=1, stream=False,
                                    stop=["\n", "<|endoftext|>"])
         return response
 
     def get_general(self, prompts) -> list[str]:
-        response = self.query_gpt3(prompts, model=self.model, max_tokens=256, top_p=1, frequency_penalty=0,
+        response = self.query_gpt3(prompts, model=self.model, max_tokens=self.max_tokens, top_p=1, frequency_penalty=0,
                                    presence_penalty=0)
         if self.model == 'chatgpt':
             response = [r['message']['content'] for r in response['choices']]
@@ -889,6 +902,10 @@ class GPT3Model(BaseModel):
                 max_tokens=max_tokens,
                 temperature=self.temperature,
             )
+        elif "deepseek" in model:
+            inputs = deepseek_tokenizer(prompt[0], return_tensors="pt").to(deepseek_model.device)
+            outputs = deepseek_model.generate(**inputs, max_new_tokens=self.max_tokens)
+            response = deepseek_tokenizer.decode(outputs[0], skip_special_tokens=True)
         else:
             response = client.chat.completions.create(
                 model=model,
@@ -988,6 +1005,14 @@ def codex_helper(extended_prompt):
         # prompt_token = responses[0].usage.prompt_tokens
         # gen_token = responses[0].usage.completion_tokens
         # print(prompt_token, gen_token)
+    elif "deepseek" in config.codex.model:
+        if not isinstance(extended_prompt, list):
+            extended_prompt = [extended_prompt]
+
+        print('start deepseek call ====>', config.codex.model)
+        inputs = deepseek_tokenizer(extended_prompt[0], return_tensors="pt").to(deepseek_model.device)
+        outputs = deepseek_model.generate(**inputs, max_new_tokens=500)
+        resp = deepseek_tokenizer.decode(outputs[0], skip_special_tokens=True)
     else:
         warnings.warn('OpenAI Codex is deprecated. Please use GPT-4 or GPT-3.5-turbo.')
         response = client.chat.completions.create(

@@ -3,14 +3,12 @@ import ast
 import math
 import sys
 import time
-import re
 import requests
 import torch.multiprocessing as mp
 from joblib import Memory
 from rich.console import Console
 from rich.live import Live
 from rich.padding import Padding
-from rich.pretty import pprint
 from rich.prompt import Prompt
 from rich.syntax import Syntax
 import traceback
@@ -22,7 +20,7 @@ from IPython.display import update_display, clear_output, display
 from PIL import Image
 import matplotlib.pyplot as plt
 from configs import config
-from utils import show_single_image
+from utils import extract_code, extract_code1, extract_code_deepseek
 
 from IPython.display import update_display, clear_output
 from IPython.core.display import HTML
@@ -253,50 +251,20 @@ def load_image(path):
     return image
 
 
-def extract_code(text):
-    # match patter: ```python```
-    try:
-        match = re.search(r"```python([\s\S]*?)```", text, re.DOTALL)
-    except:
-        print(text)
-        match = False
-
-    if match:
-        extracted_text = match.group(1)
-        extracted_text = extracted_text.strip()
-        print(f'extracted code\n{extracted_text}')
-    else:
-        extracted_text = text
-    return extracted_text
-
-def extract_code1(text):
-    # match patter: ```python
-    try:
-        match = re.search(r"```python\s*(.*)", text, re.DOTALL)
-    except:
-        print(text)
-        match = False
-
-    if match:
-        extracted_text = match.group(1)
-        extracted_text = extracted_text.strip()
-        print('extracted code\n', extracted_text)
-    else:
-        extracted_text = text
-    return extracted_text
-
-
 def get_code(query):
     model_name_codex = 'codellama' if config.codex.model == 'codellama' else 'codex'
     code = forward(model_name_codex, prompt=query, input_type="image")
-    if config.codex.model not in ('gpt-3.5-turbo', 'gpt-4', 'gpt-4o'):
-        code = f'def execute_command(image, my_fig, time_wait_between_lines, syntax):' + code # chat models give execute_command due to system behaviour
-    code = extract_code(code)
-    code = extract_code1(code)
+    print(f"code before processing\n{code}")
+    if "deepseek" in config.codex.model:
+        # chat models give execute_command due to system behaviour
+        code = extract_code_deepseek(code)
+    else:
+        code = extract_code(code)
+        code = extract_code1(code)
+        code = ast.unparse(ast.parse(code))
     code_for_syntax = code.replace("(image, my_fig, time_wait_between_lines, syntax)", "(image)")
     syntax_1 = Syntax(code_for_syntax, "python", theme="monokai", line_numbers=True, start_line=0)
     console.print(syntax_1)
-    code = ast.unparse(ast.parse(code))
     code_for_syntax_2 = code.replace("(image, my_fig, time_wait_between_lines, syntax)", "(image)")
     syntax_2 = Syntax(code_for_syntax_2, "python", theme="monokai", line_numbers=True, start_line=0)
     return code, syntax_2
@@ -357,11 +325,13 @@ def get_code_video(query, input_type="video", extra_context=""):
     # generate and process code for video QA
     model_name_codex = 'codellama' if config.codex.model == 'codellama' else 'codex'
     code = forward(model_name_codex, prompt=query, input_type=input_type, extra_context=extra_context)
-    if config.codex.model not in ('gpt-3.5-turbo', 'gpt-4', 'gpt-4o'):
-        code = f'def execute_command(video, possible_answers, query):' + code # chat models give execute_command due to system behaviour
-    code = extract_code(code)
-    code = extract_code1(code)
-    code = ast.unparse(ast.parse(code))
+    print(f"code before processing\n{code}")
+    if "deepseek" in config.codex.model:
+        code = extract_code_deepseek(code)
+    else:
+        code = extract_code(code)
+        code = extract_code1(code)
+        code = ast.unparse(ast.parse(code))
     return code
 
 

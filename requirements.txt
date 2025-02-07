@@ -37,10 +37,8 @@ setuptools==65.6.3
 tensorboardX==2.6
 tensorflow==2.11.1
 timm==0.6.12
-torch==1.13.1
-torchvision==0.14.1
 tqdm==4.64.1
-git+https://github.com/huggingface/transformers.git
+transformers==4.47.0
 wandb==0.13.9
 word2number==1.1
 yacs==0.1.8
