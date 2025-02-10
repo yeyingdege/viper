@@ -504,7 +504,7 @@ def extract_code(text):
     if match:
         extracted_text = match.group(1)
         extracted_text = extracted_text.strip()
-        print(f'extracted code\n{extracted_text}')
+        # print(f'extracted code\n{extracted_text}')
     else:
         extracted_text = text
     return extracted_text
@@ -520,7 +520,7 @@ def extract_code1(text):
     if match:
         extracted_text = match.group(1)
         extracted_text = extracted_text.strip()
-        print('extracted code\n', extracted_text)
+        # print('extracted code\n', extracted_text)
     else:
         extracted_text = text
     return extracted_text
@@ -548,49 +548,60 @@ def extract_code_deepseek(text):
     if match:
         extracted_text = match
         extracted_text = extracted_text.strip()
-        print(f'extracted code\n{extracted_text}')
+        # print(f'extracted code\n{extracted_text}')
     else:
         extracted_text = text
     return extracted_text
 
 
+def split_json_dict(path, exclude_file="", num_files=3):
+    data = json.load(open(path, "r"))
+    file_name = path.split("/")[-1].split(".")[:-1][0] # filename without extension
+    if os.path.exists(exclude_file):
+        exclude_data = json.load(open(exclude_file, "r"))
+        exclude_keys = set(exclude_data.keys())
+    else:
+        exclude_keys = ()
+    all_keys = set([item["qid"] for item in data])
+    remain_keys = all_keys - exclude_keys
+    num_ = len(remain_keys)
+    avg_num_ = num_ // num_files
+    start_idx_ = len(exclude_keys)
+    for i in range(num_files):
+        if i < num_files - 1:
+            end_idx = start_idx_ + avg_num_
+        else:
+            end_idx = len(data)
+        data_ = data[start_idx_:end_idx].copy()
+        file_name_ = f"data/{file_name}_{i+1}.json"
+        with open(file_name_, "w") as f:
+            json.dump(data_, f, indent=2)
+        start_idx_ = end_idx
+
+
+def remove_question_45(path, out_file):
+    data = json.load(open(path, "r"))
+    if isinstance(data, list):
+        new_data = []
+        for item in data:
+            quest_type = item["quest_type"]
+            if quest_type in ['qa4_step','qa5_task']:
+                continue
+            new_data.append(item)
+    else: # dict
+        new_data = {}
+        for qid, item in data.items():
+            quest_type = item["quest_type"]
+            if quest_type in ['qa4_step','qa5_task']:
+                continue
+            new_data[qid] = item
+    with open(out_file, "w") as f:
+        json.dump(new_data, f, indent=2)
+    print(len(new_data))
+
+
 if __name__=="__main__":
-    code = """
-# How many muffins can each kid have for it to be fair?
-# possible answers: 
-==========
-def execute_command(video, possible_answers, query):
-    video_segment = VideoSegment(video)
-    # Count the number of muffins in the video
-    num_muffins_all_frames = []
-    for i, frame in enumerate(video_segment.frame_iterator()):
-        num_muffins_frame = len(frame.find("muffin"))
-        num_muffins_all_frames.append(num_muffins_frame)
-    num_muffins = np.round(np.percentile(num_muffins_all_frames, 90))
-    # Create the info dictionary
-    info = {"Number of muffins": num_muffins}
-    # Answer the query
-    answer = video_segment.select_answer(info, query, possible_answers)
-    return answer
+    split_json_dict(path="data/testing_vqa19_25oct_v2_rm45.json", 
+                    exclude_file="results/answers_vipergpt_gpt4omini_rm45.json", 
+                    num_files=4)
 
-
-# What is the color of the car?
-# possible answers: ['red', 'blue', 'green', 'yellow', 'white']
-def execute_command(video, possible_answers, query)->[str, dict]:
-    video_segment = VideoSegment(video)
-    frame_of_interest = video_segment.frame_from_index(video_segment.num_frames // 2)
-    # Caption the frame
-    caption = frame_of_interest.simple_query("What is in the frame?")
-    # Find the color, among the provided options (the color is what we want to answer)
-    color_detected = frame_of_interest.best_text_match(option_list=possible_answers)
-    # Create the info dictionary
-    info = {
-        "Caption of middle frame": caption,
-        "Color detected": color_detected
-    }
-    # Answer the query
-    answer = video_segment.select_answer(info, query, possible_answers)
-    return answer
-"""
-    code = extract_code_deepseek(code)
-    print(code)

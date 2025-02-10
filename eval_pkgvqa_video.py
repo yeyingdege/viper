@@ -10,7 +10,7 @@ from vision_processes import queues_in
 from datetime import datetime
 from logger import setup_logger
 
-logger = setup_logger("vipergpt", ".", 0, filename="vipergpt.log")
+logger = setup_logger("vipergpt", ".", 0, filename="results/vipergpt_1.log")
 
 
 QUESTION_TYPES = ['qa1_step2tool', 'qa2_bestNextStep', 'qa3_nextStep',
@@ -19,12 +19,11 @@ QUESTION_TYPES = ['qa1_step2tool', 'qa2_bestNextStep', 'qa3_nextStep',
                   'qa12_toolPurpose', 'qa13_actionPurpose', 'qa14_objectPurpose',
                   'qa15_ToolOtherPurpose', 'qa16_ObjectOtherPurpose', 'qa17_AlternativeTool',
                   'qa18_TaskSameToolSamePurpose', 'qa19_TaskSameObjectSamePurpose']
-# SKIP_EVAL_TYPES = ['qa1_step2tool', 'qa2_bestNextStep', 'qa3_nextStep',
-#                    'qa4_step','qa5_task', 'qa6_precedingStep', 'qa7_bestPrecedingStep',
-#                    'qa9_bestInitial','qa10_bestFinal', 'qa11_domain']
+SKIP_EVAL_TYPES = ['qa4_step','qa5_task']
 
 
 def main(args):
+    st = datetime.now()
     vipergpt_error_cnt = 0
     # Load Questions
     annotations = json.load(open(os.path.expanduser(args.question_file), "r"))
@@ -47,10 +46,9 @@ def main(args):
         # skip evaluating examples with existing results
         if qid in results:
             continue
-        # for debugging
-        if qid != "qa3_nextStep_38193":
-            continue
         quest_type = line["quest_type"]
+        if quest_type in SKIP_EVAL_TYPES:
+            continue
         conversations = line["conversations"]
         qs = conversations[0]["value"]
         gt_answers = conversations[1]["value"]
@@ -61,7 +59,7 @@ def main(args):
 
         # Load Image
         video_path = os.path.join(args.image_folder, line["video"])
-        st = datetime.now()
+
         if "start_secs" in line:
             start_secs = line['start_secs']
             end_secs = line['end_secs']
@@ -78,8 +76,13 @@ def main(args):
         qs = qs.replace("<video>\n", "")
         # convert qs to query, which contains only the question.
         query = qs.split("select one from options:")[0]
-        possible_answers = list(line["index2ans"].values())
-        possible_answers_str = "[" + ", ".join(possible_answers) + "]"
+        possible_answers_str = "[" + ", ".join(list(line["index2ans"].values())) + "]"
+
+        opts = ""
+        for ii, one_opt in enumerate(list(line["index2ans"].values())):
+            opts += ("({}) {}\n".format(ii+1, one_opt))
+        possible_answers = opts.rstrip("\n")
+
         logger.info(f"{qid}\nquestion:{qs}\nanswer:{gt_answers}")
         total += 1
 
@@ -90,7 +93,7 @@ def main(args):
             code = code.replace("def execute_command(video, possible_answers, query):", "")
             res = run_program([code, i, images, possible_answers, query], queues_in, input_type_="video")
             outputs = res[0]
-            logger.info(f"executed code:\n{res[1]}")
+            # logger.info(f"executed code:\n{res[1]}")
         except:
             vipergpt_error_cnt += 1
             outputs = None
@@ -120,15 +123,14 @@ def main(args):
         print("-----"*5)
         avg_acc = sum(acc_list) / len(acc_list)
         print("Average Acc over Type: {:.4f}".format(avg_acc))
-        logger.info(f"global_acc: {global_acc.get_accuracy()}, avg_acc: {avg_acc}")
 
         # update results
         print("save to {}".format(args.answers_file))
         with open(args.answers_file, "w") as f:
             json.dump(results, f, indent=2)
-        
+
         et = datetime.now()
-        print("Execution time for one example:", et-st)
+        logger.info(f"Execution time: {et-st}, global_acc: {global_acc.get_accuracy()}, avg_acc: {avg_acc}")
 
     logger.info(f'vipergpt_error_cnt: {vipergpt_error_cnt}')
     print("Process Finished")
@@ -137,8 +139,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image-folder", type=str, default="data/COIN/videos")
-    parser.add_argument("--question-file", type=str, default="data/testing_vqa19_25oct_v2.json")
-    parser.add_argument("--answers-file", type=str, default="data/answers_vipergpt_gpt4omini.json")
+    parser.add_argument("--question-file", type=str, default="data/testing_vqa19_25oct_v2_rm45_1.json")
+    parser.add_argument("--answers-file", type=str, default="results/answers_vipergpt_gpt4omini_rm45_1.json")
     parser.add_argument("--num_video_frames", type=int, default=8)
     args = parser.parse_args()
     main(args)

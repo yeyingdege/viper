@@ -325,7 +325,7 @@ def get_code_video(query, input_type="video", extra_context=""):
     # generate and process code for video QA
     model_name_codex = 'codellama' if config.codex.model == 'codellama' else 'codex'
     code = forward(model_name_codex, prompt=query, input_type=input_type, extra_context=extra_context)
-    print(f"code before processing\n{code}")
+    # print(f"code before processing\n{code}")
     if "deepseek" in config.codex.model:
         code = extract_code_deepseek(code)
     else:

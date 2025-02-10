@@ -29,6 +29,9 @@ from typing import List, Union
 
 from configs import config
 from utils import HiddenPrints
+from logger import setup_logger
+
+logger = setup_logger(config.gpt3.model, ".", 0, filename="results/openai_1.log")
 
 with open('api.key') as f:
     client = OpenAI(api_key=f.read().strip())
@@ -829,16 +832,16 @@ class GPT3Model(BaseModel):
         if self.n_votes > 1:
             response_ = []
             for i in range(len(prompts)):
-                if self.model == 'chatgpt':
-                    resp_i = [r['message']['content'] for r in
-                              response['choices'][i * self.n_votes:(i + 1) * self.n_votes]]
+                if "gpt" in self.model:
+                    resp_i = [r.message.content for r in
+                              response.choices[i * self.n_votes:(i + 1) * self.n_votes]]
                 else:
                     resp_i = [r['text'] for r in response['choices'][i * self.n_votes:(i + 1) * self.n_votes]]
                 response_.append(self.most_frequent(resp_i).lstrip())
             response = response_
         else:
-            if self.model == 'chatgpt':
-                response = [r['message']['content'].lstrip() for r in response['choices']]
+            if "gpt" in self.model:
+                response = [r.message.content.lstrip() for r in response.choices]
             elif "deepseek" in self.model:
                 pass
             else:
@@ -862,7 +865,7 @@ class GPT3Model(BaseModel):
         if self.n_votes > 1:
             response_ = []
             for i in range(len(prompts)):
-                if self.model == 'chatgpt':
+                if "gpt" in self.model:
                     resp_i = [r.message.content for r in
                               response.choices[i * self.n_votes:(i + 1) * self.n_votes]]
                 else:
@@ -870,7 +873,7 @@ class GPT3Model(BaseModel):
                 response_.append(self.most_frequent(resp_i))
             response = response_
         else:
-            if self.model in ["chatgpt", "gpt-4o", "gpt-3.5-turbo", "gpt-4"]:
+            if "gpt" in self.model: # any llm from openai api
                 response = [r.message.content for r in response.choices]
             elif "deepseek" in self.model:
                 pass
@@ -886,18 +889,18 @@ class GPT3Model(BaseModel):
     def get_general(self, prompts) -> list[str]:
         response = self.query_gpt3(prompts, model=self.model, max_tokens=self.max_tokens, top_p=1, frequency_penalty=0,
                                    presence_penalty=0)
-        if self.model == 'chatgpt':
-            response = [r['message']['content'] for r in response['choices']]
+        if "gpt" in self.model:
+            response = [r.message.content for r in response.choices]
         else:
             response = [r["text"] for r in response['choices']]
         return response
 
     def query_gpt3(self, prompt, model="text-davinci-003", max_tokens=16, logprobs=None, stream=False,
                    stop=None, top_p=1, frequency_penalty=0, presence_penalty=0):
-        if model in ["chatgpt", "gpt-4o", "gpt-3.5-turbo", "gpt-4"]:
+        if "gpt" in model: # any llm from openai api
             messages = [{"role": "user", "content": p} for p in prompt]
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model=model,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=self.temperature,
@@ -953,6 +956,10 @@ class GPT3Model(BaseModel):
         else:
             response = []  # All previously cached
 
+        # log llm prompt and response
+        for p, res in zip(prompt, response):
+            logger.info(f"prompt: {p}\nresponse: {res}")
+
         if config.use_cache:
             for p, r in zip(prompt, response):
                 # "call" forces the overwrite of the cache
@@ -972,12 +979,12 @@ class GPT3Model(BaseModel):
 
 
 # @cache.cache
-@backoff.on_exception(backoff.expo, Exception, max_tries=10)
+@backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def codex_helper(extended_prompt):
     assert 0 <= config.codex.temperature <= 1
     assert 1 <= config.codex.best_of <= 20
 
-    if config.codex.model in ("gpt-4", "gpt-3.5-turbo", "gpt-4o"):
+    if "gpt" in config.codex.model:
         if not isinstance(extended_prompt, list):
             extended_prompt = [extended_prompt]
 
@@ -1005,6 +1012,9 @@ def codex_helper(extended_prompt):
         # prompt_token = responses[0].usage.prompt_tokens
         # gen_token = responses[0].usage.completion_tokens
         # print(prompt_token, gen_token)
+        # log llm response
+        logger.info(f"code prompt tokens ({responses[0].usage.prompt_tokens}), \
+                    response ({responses[0].usage.completion_tokens} tokens):\n{resp[0]}")
     elif "deepseek" in config.codex.model:
         if not isinstance(extended_prompt, list):
             extended_prompt = [extended_prompt]
