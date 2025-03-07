@@ -561,7 +561,7 @@ def split_json_dict(path, exclude_file="", num_files=3):
         exclude_data = json.load(open(exclude_file, "r"))
         exclude_keys = set(exclude_data.keys())
     else:
-        exclude_keys = ()
+        exclude_keys = set()
     all_keys = set([item["qid"] for item in data])
     remain_keys = all_keys - exclude_keys
     num_ = len(remain_keys)
@@ -600,8 +600,22 @@ def remove_question_45(path, out_file):
     print(len(new_data))
 
 
-if __name__=="__main__":
-    split_json_dict(path="data/testing_vqa19_25oct_v2_rm45.json", 
-                    exclude_file="results/answers_vipergpt_gpt4omini_rm45.json", 
-                    num_files=4)
+def remove_none_results(path, out_file):
+    data = json.load(open(path, "r"))
+    new_data = {}
+    for qid, item in data.items():
+        response = item["response"]
+        if response == "None":
+            continue
+        new_data[qid] = item
+    with open(out_file, "w") as f:
+        json.dump(new_data, f, indent=2)
+    print(len(new_data))
 
+
+if __name__=="__main__":
+    split_json_dict(path="data/testing_vqa17_12Feb25_full.json", 
+                    exclude_file="", 
+                    num_files=4)
+    # remove_none_results("results/answers_vipergpt_gpt4omini_rm45_1.json", 
+    #                     out_file="results/new_answers_vipergpt_gpt4omini_rm45_1.json")
